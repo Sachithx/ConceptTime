@@ -205,21 +205,4 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-dataset/
-wandb/
-# HAR/
-# output/
-# output/HAR/gaussian_entropy_best.pt
-HAR/test.pt
-HAR/train.pt
-HAR/val.pt
-output/Epilepsy/gaussian_entropy_best.pt
-output/HAR/pipeline/entropy/pipeline_M8.pt
-output/HAR/pipeline/entropy/pipeline_M16.pt
-output/HAR/pipeline/entropy/pipeline_M32.pt
-output/HAR/pipeline/entropy/pipeline_M64.pt
-output/HAR/pipeline/entropy/pipeline_M128.pt
-output/HAR/pipeline/static/pipeline_M32.pt
-output/SLeep-EDF/gaussian_entropy_best.pt
-output/Epilepsy/pipeline/entropy/pipeline_M8.pt
-output/Epilepsy/diagnostics/baseline_nll.txt
+.DS_Store

@@ -1,0 +1,9 @@
+torch==2.10.0
+numpy==1.25.2
+scipy==1.15.3
+scikit-learn==1.7.2
+matplotlib==3.10.6
+tqdm==4.67.1
+umap-learn==0.5.12
+einops==0.8.2
+pandas==2.3.3

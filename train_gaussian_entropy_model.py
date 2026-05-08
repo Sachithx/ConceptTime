@@ -1,7 +1,7 @@
 """
 train_gaussian_entropy.py
 ─────────────────────────
-Trains GaussianGPT + ChannelMixer on HAR for entropy-guided patch segmentation.
+Trains GaussianGPT on a time-series dataset for entropy-guided patch segmentation.
 
 Key differences vs the old discrete GPT (train_entropy_model.py):
   - No tokenizer: model receives raw normalised floats directly
@@ -11,7 +11,7 @@ Key differences vs the old discrete GPT (train_entropy_model.py):
   - Loss: Gaussian NLL + calibration regularization
   - Entropy: analytic 0.5*(1 + log(2pi*e*sigma^2)) averaged over channels
 
-Checkpoint saved to output/HAR/gaussian_entropy_best.pt with keys:
+Checkpoint saved to output/<dataset>/gaussian_entropy_best.pt with keys:
   epoch, model_state_dict, channel_mixer_state_dict, val_loss,
   channel_mean, channel_std, n_channels, block_size
 """
@@ -26,8 +26,6 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
-import wandb
-
 import math
 import numpy as np
 
@@ -35,42 +33,24 @@ from GaussianEntropyModel import GaussianGPT, GaussianGPTConfig
 
 # ── Per-dataset configuration ─────────────────────────────────────────────────
 DATASET_CONFIGS = {
-    "HAR": {
-        "root_path":      "./HAR",
-        "n_channels":     9,
-        "seq_len":        127,
-        "output_dir":     "output/HAR",
-        "save_path":      "output/HAR/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - HAR Gaussian",
-        "wandb_tags":     ["gaussian", "HAR", "entropy", "GaussianGPT"],
-    },
-    "Epilepsy": {
-        "root_path":      "./dataset/Epilepsy",
-        "n_channels":     1,
-        "seq_len":        177,
-        "output_dir":     "output/Epilepsy",
-        "save_path":      "output/Epilepsy/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - Epilepsy Gaussian",
-        "wandb_tags":     ["gaussian", "Epilepsy", "entropy", "GaussianGPT"],
-    },
-    "SLeep-EDF": {
-        "root_path":      "./dataset/SLeep-EDF",
-        "n_channels":     1,
-        "seq_len":        2999,
-        "output_dir":     "output/SLeep-EDF",
-        "save_path":      "output/SLeep-EDF/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - SLeep-EDF Gaussian",
-        "wandb_tags":     ["gaussian", "SLeep-EDF", "entropy", "GaussianGPT"],
-    },
-    "FD": {
-        "root_path":      "./dataset/FD",
-        "n_channels":     1,
-        "seq_len":        5119,
-        "output_dir":     "output/FD",
-        "save_path":      "output/FD/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - FD Gaussian",
-        "wandb_tags":     ["gaussian", "FD", "entropy", "GaussianGPT"],
-    },
+    "HAR":                  {"root_path": "./dataset/HAR",                  "n_channels": 9,   "seq_len": 127,  "output_dir": "output/HAR",                  "save_path": "output/HAR/gaussian_entropy_best.pt"},
+    "Epilepsy":             {"root_path": "./dataset/Epilepsy",             "n_channels": 1,   "seq_len": 177,  "output_dir": "output/Epilepsy",             "save_path": "output/Epilepsy/gaussian_entropy_best.pt"},
+    "SLeep-EDF":            {"root_path": "./dataset/SLeep-EDF",            "n_channels": 1,   "seq_len": 2999, "output_dir": "output/SLeep-EDF",            "save_path": "output/SLeep-EDF/gaussian_entropy_best.pt"},
+    "FD-A":                 {"root_path": "./dataset/FD-A",                 "n_channels": 1,   "seq_len": 5119, "output_dir": "output/FD-A",                 "save_path": "output/FD-A/gaussian_entropy_best.pt"},
+    "FD-B":                 {"root_path": "./dataset/FD-B",                 "n_channels": 1,   "seq_len": 5119, "output_dir": "output/FD-B",                 "save_path": "output/FD-B/gaussian_entropy_best.pt"},
+    "FD-C":                 {"root_path": "./dataset/FD-C",                 "n_channels": 1,   "seq_len": 5119, "output_dir": "output/FD-C",                 "save_path": "output/FD-C/gaussian_entropy_best.pt"},
+    "FD-D":                 {"root_path": "./dataset/FD-D",                 "n_channels": 1,   "seq_len": 5119, "output_dir": "output/FD-D",                 "save_path": "output/FD-D/gaussian_entropy_best.pt"},
+    # ── UEA/UCR archive datasets ──────────────────────────────────────────────
+    "EthanolConcentration": {"root_path": "./dataset/EthanolConcentration", "n_channels": 3,   "seq_len": 1750, "output_dir": "output/EthanolConcentration", "save_path": "output/EthanolConcentration/gaussian_entropy_best.pt"},
+    "FaceDetection":        {"root_path": "./dataset/FaceDetection",        "n_channels": 144, "seq_len": 61,   "output_dir": "output/FaceDetection",        "save_path": "output/FaceDetection/gaussian_entropy_best.pt"},
+    "Handwriting":          {"root_path": "./dataset/Handwriting",          "n_channels": 3,   "seq_len": 151,  "output_dir": "output/Handwriting",          "save_path": "output/Handwriting/gaussian_entropy_best.pt"},
+    "Heartbeat":            {"root_path": "./dataset/Heartbeat",            "n_channels": 61,  "seq_len": 404,  "output_dir": "output/Heartbeat",            "save_path": "output/Heartbeat/gaussian_entropy_best.pt"},
+    "JapaneseVowels":       {"root_path": "./dataset/JapaneseVowels",       "n_channels": 12,  "seq_len": 28,   "output_dir": "output/JapaneseVowels",       "save_path": "output/JapaneseVowels/gaussian_entropy_best.pt"},
+    "PEMS-SF":              {"root_path": "./dataset/PEMS-SF",              "n_channels": 963, "seq_len": 143,  "output_dir": "output/PEMS-SF",              "save_path": "output/PEMS-SF/gaussian_entropy_best.pt"},
+    "SelfRegulationSCP1":   {"root_path": "./dataset/SelfRegulationSCP1",   "n_channels": 6,   "seq_len": 895,  "output_dir": "output/SelfRegulationSCP1",   "save_path": "output/SelfRegulationSCP1/gaussian_entropy_best.pt"},
+    "SelfRegulationSCP2":   {"root_path": "./dataset/SelfRegulationSCP2",   "n_channels": 7,   "seq_len": 1151, "output_dir": "output/SelfRegulationSCP2",   "save_path": "output/SelfRegulationSCP2/gaussian_entropy_best.pt"},
+    "SpokenArabicDigits":   {"root_path": "./dataset/SpokenArabicDigits",   "n_channels": 13,  "seq_len": 92,   "output_dir": "output/SpokenArabicDigits",   "save_path": "output/SpokenArabicDigits/gaussian_entropy_best.pt"},
+    "UWaveGestureLibrary":  {"root_path": "./dataset/UWaveGestureLibrary",  "n_channels": 3,   "seq_len": 314,  "output_dir": "output/UWaveGestureLibrary",  "save_path": "output/UWaveGestureLibrary/gaussian_entropy_best.pt"},
 }
 
 
@@ -111,11 +91,10 @@ class Config:
     d_conv       = 4               # Mamba: depthwise conv kernel width
     d_expand     = 2               # Mamba: inner-dim expansion factor
 
-    # Data
-    root_path   = "./HAR"
-    n_channels  = 9
-    seq_len     = 127
-    pred_len    = 1
+    # Data (set from DATASET_CONFIGS in main)
+    root_path   = ""
+    n_channels  = 1
+    seq_len     = 1
     batch_size  = 128
     num_workers = 4
 
@@ -131,13 +110,9 @@ class Config:
     decay_lr             = True
     patience             = 10
 
-    # Output
-    output_dir = "output/HAR"
-    save_path  = "output/HAR/gaussian_entropy_best.pt"
-
-    # W&B
-    wandb_project = "Entropy Model - HAR Gaussian"
-    wandb_tags    = ["gaussian", "HAR", "entropy", "GaussianGPT"]
+    # Output (set from DATASET_CONFIGS in main)
+    output_dir = ""
+    save_path  = ""
 
 
 # ============================================================================
@@ -145,11 +120,11 @@ class Config:
 # ============================================================================
 
 class TimeSeriesDataset(Dataset):
-    """Generic loader for HAR, Epilepsy, SLeep-EDF, and FD.
+    """Generic loader for all supported datasets.
 
     Handles three storage formats:
       [N, T]    (FD flat)         → unsqueeze to [N, T, 1]
-      [N, C, T] (HAR/Epilepsy/SLeep-EDF stored channel-first) → permute to [N, T, C]
+      [N, C, T] (channel-first datasets) → permute to [N, T, C]
     FD splits are stored as multiple files (train_a.pt, …) and are concatenated.
     """
     def __init__(self, root_path, flag="train", seq_len=127):
@@ -395,14 +370,6 @@ def train_epoch(model, channel_mixer, loader, optimizer, scaler,
         with torch.no_grad():
             residual_sq_acc += (y_norm - mu.detach()).pow(2).mean().item()
 
-        step = epoch * num_batches + i + 1
-        wandb.log({
-            "train/batch_loss":  batch_loss,
-            "train/avg_loss":    avg_loss,
-            "train/lr":          current_lr,
-            "es/counter":        es.counter,
-        }, step=step)
-
         pbar.set_postfix(loss=f"{avg_loss:.4f}", lr=f"{current_lr:.2e}",
                          pat=f"{es.counter}/{es.patience}")
 
@@ -416,7 +383,7 @@ def train_epoch(model, channel_mixer, loader, optimizer, scaler,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset",   default="HAR",
+    parser.add_argument("--dataset",   default="Epilepsy",
                         choices=list(DATASET_CONFIGS.keys()),
                         help="Dataset to train on")
     parser.add_argument("--backbone",  default="transformer",
@@ -436,8 +403,6 @@ def main():
     cfg.n_channels     = dc["n_channels"]
     cfg.seq_len        = dc["seq_len"]
     cfg.output_dir     = dc["output_dir"]
-    cfg.wandb_project  = dc["wandb_project"]
-    cfg.wandb_tags     = dc["wandb_tags"] + [args.backbone]
 
     # Backbone config
     cfg.backbone  = args.backbone
@@ -446,7 +411,7 @@ def main():
     cfg.d_expand  = args.d_expand
 
     # Separate checkpoint per backbone so both can coexist in output/
-    base = dc["save_path"]          # e.g. output/HAR/gaussian_entropy_best.pt
+    base = dc["save_path"]
     cfg.save_path = (base.replace("_best.pt", f"_{args.backbone}_best.pt")
                      if args.backbone != "transformer" else base)
 
@@ -457,7 +422,8 @@ def main():
     # ── Data ─────────────────────────────────────────────────────────────────
     train_ds = TimeSeriesDataset(cfg.root_path, "train", cfg.seq_len)
     val_ds   = TimeSeriesDataset(cfg.root_path, "val",   cfg.seq_len)
-    train_loader = DataLoader(train_ds, batch_size=cfg.batch_size,
+    train_bs = min(cfg.batch_size, len(train_ds))
+    train_loader = DataLoader(train_ds, batch_size=train_bs,
                               shuffle=True,  num_workers=cfg.num_workers,
                               drop_last=True, pin_memory=True)
     val_loader   = DataLoader(val_ds,   batch_size=cfg.batch_size,
@@ -503,25 +469,6 @@ def main():
     total_steps = (len(train_loader) // cfg.grad_accumulation) * cfg.epochs
     es          = EarlyStopping(patience=cfg.patience, save_path=cfg.save_path)
 
-    # ── W&B ──────────────────────────────────────────────────────────────────
-    wandb.init(
-        project = cfg.wandb_project,
-        tags    = cfg.wandb_tags,
-        config  = {
-            "model":    {"backbone": cfg.backbone,
-                         "n_layer": cfg.n_layer, "n_head": cfg.n_head,
-                         "n_embd": cfg.n_embd, "n_channels": cfg.n_channels,
-                         "dropout": cfg.dropout, "calib_weight": cfg.calib_weight,
-                         "d_state": cfg.d_state, "d_conv": cfg.d_conv,
-                         "d_expand": cfg.d_expand},
-            "training": {"lr": cfg.lr, "epochs": cfg.epochs,
-                         "batch_size": cfg.batch_size, "patience": cfg.patience},
-            "norm":     {"channel_mean": channel_mean.tolist(),
-                         "channel_std":  channel_std.tolist()},
-        },
-    )
-    wandb.log({"dataset/train": len(train_ds), "dataset/val": len(val_ds)})
-
     total_params = (sum(p.numel() for p in model.parameters()) +
                     sum(p.numel() for p in channel_mixer.parameters()))
     print(f"Total params: {total_params:,}  |  device: {cfg.device}  |  steps: {total_steps}")
@@ -542,16 +489,6 @@ def main():
               f"lr={lr:.2e}  t={t_train:.1f}s  "
               f"residual²={mean_residual_sq:.4f}")
 
-        epoch_log = {
-            "epoch/train_loss":    train_loss,
-            "epoch/val_loss":      val_loss,
-            "epoch/lr":            lr,
-            "epoch/mean_residual_sq": mean_residual_sq,  # should be > 0; near 0 = mean-head collapse
-        }
-        for c_idx, c_nll in enumerate(val_channel_nlls):
-            epoch_log[f"val/channel_{c_idx}_nll"] = c_nll
-        wandb.log(epoch_log, step=(epoch + 1) * len(train_loader))
-
         es(val_loss, model, channel_mixer, epoch + 1, channel_mean, channel_std)
         if es.early_stop:
             print(f"Early stopping at epoch {epoch+1}  (best val={es.val_min:.4f})")
@@ -561,13 +498,6 @@ def main():
     elapsed = time.time() - t_start
     print(f"\nTraining complete in {elapsed/60:.1f} min")
     print(f"Best val loss: {es.val_min:.4f}  →  {cfg.save_path}")
-
-    wandb.log({
-        "summary/best_val_loss":    es.val_min,
-        "summary/total_minutes":    elapsed / 60,
-        "summary/epochs_completed": epoch + 1,
-    })
-    wandb.finish()
 
     return model, channel_mixer
 

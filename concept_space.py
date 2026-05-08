@@ -24,16 +24,32 @@ def fit_kmeans(sigs: np.ndarray, M: int, n_init: int = 10, max_iter: int = 300,
 
 
 def fit_gmm(sigs: np.ndarray, M: int, seed: int = 42,
-            covariance_type: str = "diag") -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Returns means [M,D], covariances [M,D] (diag), labels [N]."""
+            covariance_type: str = "diag",
+            reg_covar: float = 1e-4) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Returns means [M,D], covariances [M,D] (diag), labels [N].
+
+    Retries with increasing reg_covar if components collapse (common when data
+    is near-degenerate or M is large relative to the intrinsic dimensionality).
+    """
     from sklearn.mixture import GaussianMixture
-    gm = GaussianMixture(n_components=M, covariance_type=covariance_type,
-                         random_state=seed, max_iter=300, n_init=3)
-    gm.fit(sigs)
-    labels = gm.predict(sigs)
-    return (gm.means_.astype(np.float32),
-            gm.covariances_.astype(np.float32),
-            labels)
+    for reg in [reg_covar, 1e-3, 1e-2, 0.1]:
+        try:
+            gm = GaussianMixture(n_components=M, covariance_type=covariance_type,
+                                 random_state=seed, max_iter=300, n_init=3,
+                                 reg_covar=reg)
+            gm.fit(sigs)
+            labels = gm.predict(sigs)
+            if reg > reg_covar:
+                print(f"  [GMM] converged with reg_covar={reg:.0e}")
+            return (gm.means_.astype(np.float32),
+                    gm.covariances_.astype(np.float32),
+                    labels)
+        except ValueError:
+            print(f"  [GMM] collapsed with reg_covar={reg:.0e}, retrying …")
+    raise RuntimeError(
+        f"GMM fitting failed for M={M} even with reg_covar=0.1. "
+        "Consider reducing M or switching to --cluster_algo kmeans."
+    )
 
 
 def fit_hdbscan(sigs: np.ndarray, min_cluster_size: int = 20,
@@ -82,7 +98,7 @@ class ConceptSpace:
         Fits clusters and stores prototypes.
         """
         self.algorithm = algorithm
-        sigs_np = sigs.numpy().astype(np.float64)
+        sigs_np = sigs.cpu().numpy().astype(np.float64)
 
         if algorithm == "kmeans":
             centroids_np, labels = fit_kmeans(sigs_np, self.M, seed=seed, **kwargs)
@@ -113,7 +129,7 @@ class ConceptSpace:
                 self.prototype_idxs.append([])
                 continue
             # find top-k nearest to centroid
-            dists = np.linalg.norm(sigs_np[mask] - self.centroids[m].numpy(), axis=1)
+            dists = np.linalg.norm(sigs_np[mask] - self.centroids[m].cpu().numpy(), axis=1)
             top_k = mask[np.argsort(dists)[:n_prototypes_per_cluster]]
             self.prototype_idxs.append(top_k.tolist())
 
@@ -207,18 +223,18 @@ class ConceptSpace:
     def nmi_with_labels(self, sigs: torch.Tensor,
                          labels: torch.Tensor) -> float:
         from sklearn.metrics import normalized_mutual_info_score
-        assignments = self.hard_assign(sigs).numpy()
-        return float(normalized_mutual_info_score(labels.numpy(), assignments,
+        assignments = self.hard_assign(sigs).cpu().numpy()
+        return float(normalized_mutual_info_score(labels.cpu().numpy(), assignments,
                                                    average_method="arithmetic"))
 
     def silhouette(self, sigs: torch.Tensor,
                    max_samples: int = 5000) -> float:
         from sklearn.metrics import silhouette_score
-        assignments = self.hard_assign(sigs).numpy()
+        assignments = self.hard_assign(sigs).cpu().numpy()
         n = min(len(sigs), max_samples)
         idx = np.random.choice(len(sigs), n, replace=False) if len(sigs) > n else np.arange(len(sigs))
         try:
-            return float(silhouette_score(sigs[idx].numpy(), assignments[idx]))
+            return float(silhouette_score(sigs[idx].cpu().numpy(), assignments[idx]))
         except Exception:
             return float("nan")
 

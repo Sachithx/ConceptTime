@@ -15,15 +15,62 @@ import torch.nn as nn
 from typing import List, Tuple
 
 
-# ── Per-dataset defaults ──────────────────────────────────────────────────────
-# L_max = 2x expected average patch length.  Guarantees no patch grows beyond
-# this regardless of how flat the entropy signal is (rest-class fix).
-PATCH_CONFIGS = {
-    "HAR":       {"L_min": 8,   "L_max": 32,  "K": 8,  "burn_in": 10},
-    "Epilepsy":  {"L_min": 10,  "L_max": 44,  "K": 8,  "burn_in": 10},
-    "SLeep-EDF": {"L_min": 50,  "L_max": 375, "K": 16, "burn_in": 20},
-    "FD":        {"L_min": 64,  "L_max": 640, "K": 16, "burn_in": 20},
+# ── Patch scale library ───────────────────────────────────────────────────────
+# Each scale sets K ≈ T * k_frac (number of patches scales with sequence length).
+# L_min, L_max, and burn_in are then derived automatically from avg_len = T / K.
+#
+# Choosing a scale:
+#   xs — very short patches, many of them  (K ≈ T/5)
+#   s  — short patches                     (K ≈ T/8)
+#   m  — medium patches                    (K ≈ T/12)
+#   l  — long patches                      (K ≈ T/20)
+#   xl — very long patches, few of them    (K ≈ T/50)
+PATCH_SCALES: dict[str, float] = {
+    "xs": 0.20,
+    "s":  0.12,
+    "m":  0.08,
+    "l":  0.05,
+    "xl": 0.02,
 }
+
+# Per-dataset scale selection — the only thing that needs tuning per dataset.
+DATASET_PATCH_SCALE: dict[str, str] = {
+    "HAR":                  "m",    # T~128  → K~10
+    "Epilepsy":             "l",    # T~178  → K~10
+    "SLeep-EDF":            "xl",   # T~3000 → K~60
+    "FD-A":                 "xl",    # T~5120  → K~100
+    "FD-B":                 "xl",    # T~5120  → K~100
+    "FD-C":                 "xl",    # T~5120  → K~100
+    "FD-D":                 "xl",    # T~5120  → K~100
+    # ── UEA/UCR archive ───────────────────────────────────────────────────────
+    "JapaneseVowels":       "xl",   # T=28   → K=2
+    "FaceDetection":        "xs",   # T=61   → K=12
+    "SpokenArabicDigits":   "m",    # T=92   → K=7
+    "PEMS-SF":              "s",    # T=144  → K=17
+    "Handwriting":          "xs",    # T=152  → K=8
+    "UWaveGestureLibrary":  "l",    # T=315  → K=16
+    "Heartbeat":            "l",    # T=405  → K=20
+    "SelfRegulationSCP1":   "l",    # T=896  → K=45
+    "SelfRegulationSCP2":   "xl",   # T=1152 → K=23
+    "EthanolConcentration": "xl",   # T=1751 → K=35
+}
+
+
+def get_patch_config(dataset: str, T: int, scale: str = None) -> dict:
+    """
+    Derive {K, L_min, L_max, burn_in} from the dataset's patch scale and T.
+
+    scale overrides DATASET_PATCH_SCALE when provided (e.g. from --patch_scale CLI arg).
+    """
+    k_frac  = PATCH_SCALES[scale or DATASET_PATCH_SCALE.get(dataset, "m")]
+    K       = max(2, round(T * k_frac))
+    avg_len = T / K
+    L_min   = max(2, round(avg_len * 0.50))
+    L_max   = max(L_min + 1, round(avg_len * 2.0))
+    burn_in = max(2, L_min)
+    # return {"K": K, "L_min": L_min, "L_max": L_max, "burn_in": burn_in}
+    return {"K": 8, "L_min": 16, "L_max": 32, "burn_in": 10}
+
 
 
 # ── DP segmentation core ──────────────────────────────────────────────────────
@@ -171,6 +218,36 @@ def compute_boundary_signal(model, channel_mixer, x_norm: torch.Tensor,
         raise ValueError(f"Unknown boundary mode: {mode}")
 
 
+def boundary_signal_from_precomputed(mu: torch.Tensor, log_var: torch.Tensor,
+                                      y_norm: torch.Tensor, mode: str) -> np.ndarray:
+    """
+    Same as compute_boundary_signal but uses already-computed mu/log_var [T, C].
+    Avoids a redundant model forward pass when outputs are already available.
+    """
+    if mode == "entropy":
+        LOG2PIE = math.log(2 * math.pi * math.e)
+        return (0.5 * (LOG2PIE + log_var)).mean(dim=-1).cpu().numpy()
+
+    elif mode == "surprise":
+        inv_var = torch.exp(-log_var)
+        nll = 0.5 * (log_var + (y_norm - mu).pow(2) * inv_var)
+        return nll.mean(dim=-1).cpu().numpy()
+
+    elif mode == "kl_shift":
+        mu1, mu2 = mu[:-1], mu[1:]
+        lv1, lv2 = log_var[:-1], log_var[1:]
+        kl = 0.5 * ((lv2 - lv1) + lv1.exp() / lv2.exp() +
+                     (mu2 - mu1).pow(2) / lv2.exp() - 1).sum(dim=-1)
+        return np.concatenate([[0.0], kl.clamp(min=0).cpu().numpy()])
+
+    elif mode == "residual":
+        inv_var = torch.exp(-log_var).clamp(max=1e6)
+        return ((y_norm - mu).pow(2) * inv_var).mean(dim=-1).cpu().numpy()
+
+    else:
+        raise ValueError(f"Unknown boundary mode: {mode}")
+
+
 # ── EntropyPatcher ────────────────────────────────────────────────────────────
 
 class EntropyPatcher:
@@ -225,6 +302,30 @@ class EntropyPatcher:
         return patches
 
     @torch.no_grad()
+    def patch_signal_precomputed(self, mu: torch.Tensor, log_var: torch.Tensor,
+                                  y_norm: torch.Tensor) -> List[Tuple[int, int]]:
+        """Use already-computed model outputs [T, C] to skip a redundant forward pass."""
+        T = mu.shape[0]
+        score = boundary_signal_from_precomputed(mu, log_var, y_norm, self.mode)
+        score[:self.burn_in] = score.min()
+
+        if self.K <= 1:
+            return [(0, T)]
+
+        boundaries = dp_segment(score, self.K, self.L_min, self.L_max)
+        patches    = boundaries_to_patches(boundaries, T)
+
+        while len(patches) < self.K and len(patches) > 0:
+            last = patches[-1]
+            mid  = (last[0] + last[1]) // 2
+            if mid > last[0]:
+                patches = patches[:-1] + [(last[0], mid), (mid, last[1])]
+            else:
+                break
+
+        return patches
+
+    @torch.no_grad()
     def patch_batch(self, x_norm: torch.Tensor,
                     y_norm: torch.Tensor) -> List[List[Tuple[int, int]]]:
         """x_norm, y_norm: [B, T, C]. Returns list of patch lists."""
@@ -252,7 +353,7 @@ class GreedyDualThresholdPatcher:
 
     This directly mirrors the monotonicity-based greedy algorithm in EntroPE
     (patch_start_mask_from_entropy_with_monotonicity_adaptive in Patcher.py),
-    applied to PRECEPT's density model entropy signal so the backbone is matched.
+    applied to ConceptTime's density model entropy signal so the backbone is matched.
     """
 
     def __init__(self, model, channel_mixer,
@@ -316,6 +417,46 @@ class GreedyDualThresholdPatcher:
         return patches
 
     @torch.no_grad()
+    def patch_signal_precomputed(self, mu: torch.Tensor, log_var: torch.Tensor,
+                                  y_norm: torch.Tensor) -> List[Tuple[int, int]]:
+        """Use already-computed model outputs [T, C] to skip a redundant forward pass."""
+        T = mu.shape[0]
+        H = boundary_signal_from_precomputed(mu, log_var, y_norm, self.mode)
+        H[:self.burn_in] = H.min()
+
+        dH = np.diff(H, prepend=H[0])
+
+        theta_lo = float(np.quantile(dH, self.lo_q))
+        theta_hi = float(np.quantile(dH, self.hi_q))
+
+        boundaries = []
+        last_b = 0
+        for t in range(1, T):
+            hard = dH[t] > theta_hi
+            soft = dH[t] > theta_lo and (t - last_b) >= self.L_min
+            if hard or soft:
+                boundaries.append(t)
+                last_b = t
+
+        if len(boundaries) > self.K - 1:
+            scores = [(dH[b], b) for b in boundaries]
+            scores.sort(reverse=True)
+            boundaries = sorted([b for _, b in scores[:self.K - 1]])
+
+        patches = boundaries_to_patches(np.array(boundaries, dtype=np.int32), T)
+
+        while len(patches) < self.K and len(patches) > 0:
+            longest = max(range(len(patches)), key=lambda i: patches[i][1] - patches[i][0])
+            s, e = patches[longest]
+            mid  = (s + e) // 2
+            if mid > s:
+                patches = patches[:longest] + [(s, mid), (mid, e)] + patches[longest + 1:]
+            else:
+                break
+
+        return patches
+
+    @torch.no_grad()
     def patch_batch(self, x_norm: torch.Tensor,
                     y_norm: torch.Tensor) -> List[List[Tuple[int, int]]]:
         return [self.patch_signal(x_norm[i], y_norm[i])
@@ -344,33 +485,3 @@ class StaticPatcher:
         p = self.patch_signal(T)
         return [p for _ in range(B)]
 
-
-# ── Normalise-then-patch helper ───────────────────────────────────────────────
-
-@torch.no_grad()
-def normalize_signal(x: torch.Tensor, channel_mixer,
-                     channel_mean: torch.Tensor,
-                     channel_std: torch.Tensor,
-                     device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    x: [T, C] raw signal.
-    Returns x_norm, y_norm: [T-1, C] and [T-1, C] (shifted by 1).
-    """
-    x = x.to(device)
-    xn = (x - channel_mean) / channel_std
-    xn = channel_mixer(xn.unsqueeze(0).permute(0, 2, 1)).permute(0, 2, 1).squeeze(0)
-    return xn[:-1], xn[1:]
-
-
-@torch.no_grad()
-def normalize_batch(x_batch: torch.Tensor, y_batch: torch.Tensor,
-                    channel_mixer, channel_mean: torch.Tensor,
-                    channel_std: torch.Tensor, device: torch.device):
-    """x_batch, y_batch: [B, T, C]. Returns normalized versions."""
-    x_batch = x_batch.to(device)
-    y_batch = y_batch.to(device)
-    x_n = (x_batch - channel_mean) / channel_std
-    y_n = (y_batch - channel_mean) / channel_std
-    x_n = channel_mixer(x_n.permute(0, 2, 1)).permute(0, 2, 1)
-    y_n = channel_mixer(y_n.permute(0, 2, 1)).permute(0, 2, 1)
-    return x_n, y_n

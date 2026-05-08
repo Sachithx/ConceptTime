@@ -62,7 +62,7 @@ def _morph_features(y_patch: torch.Tensor) -> torch.Tensor:
     s = y_patch.mean(dim=-1)          # [L] channel-averaged signal
 
     s_mean = s.mean()
-    s_std  = s.std().clamp(min=1e-8)
+    s_std  = s.std(correction=0).clamp(min=1e-8)
     s_c    = s - s_mean               # mean-centered
 
     # 1. FFT peak frequency (normalized by Nyquist bin count; 0 for short patches)
@@ -146,7 +146,7 @@ def _surprise_trajectory_features(mu_patch: torch.Tensor,
 
     nll_t = 0.5 * (log_var_patch + (y_patch - mu_patch).pow(2) /
                    (sigma2 + 1e-8))
-    nll_t = nll_t.mean(dim=-1)                                      # [L]
+    nll_t = nll_t.mean(dim=-1).clamp(max=50.0)                      # [L] cap extreme NLL
 
     H_t   = 0.5 * (LOG2PIE + log_var_patch).mean(dim=-1)           # [L]
     H_max = H_t.max().clamp(min=1e-8)
@@ -156,7 +156,7 @@ def _surprise_trajectory_features(mu_patch: torch.Tensor,
                            if L > 1 else torch.zeros((), device=device))
     confident_surprise  = (nll_t * (1.0 - H_t / H_max)).mean()
     residual_energy     = ((y_patch - mu_patch).pow(2) /
-                           (sigma2 + 1e-8)).mean()
+                           (sigma2 + 1e-8)).mean().clamp(max=1e4)
 
     return torch.stack([surprise_argmax_pos, surprise_spread,
                         confident_surprise, residual_energy])
@@ -347,7 +347,7 @@ def extract_signatures_for_dataset(model, channel_mixer,
                                     dataset, patch_fn,
                                     channel_mean, channel_std,
                                     mu_marg, sigma2_marg,
-                                    device, batch_size=64,
+                                    device, batch_size=1024,
                                     mode="full") -> Tuple[torch.Tensor,
                                                           List[List[Tuple[int, int]]],
                                                           torch.Tensor]:
@@ -371,6 +371,7 @@ def extract_signatures_for_dataset(model, channel_mixer,
     # resolve patch_fn dispatch — determined lazily on first real call to avoid
     # running model on wrong device via a probe with dummy tensors
     _patch_signal = getattr(patch_fn, 'patch_signal', None)
+    _patch_signal_precomputed = getattr(patch_fn, 'patch_signal_precomputed', None)
     _use_len_only = None  # None = unknown, True/False cached after first call
 
     def _patch_dispatch(xn, yn):
@@ -390,7 +391,7 @@ def extract_signatures_for_dataset(model, channel_mixer,
             return _patch_signal(xn.shape[0])
 
     # batch_size > 1: amortises channel_mixer + model launches across samples.
-    # requires fixed-length samples (true for windowed HAR/Epilepsy datasets).
+    # requires fixed-length samples (true for all windowed datasets).
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False,
                         num_workers=0, drop_last=False)
 
@@ -418,7 +419,10 @@ def extract_signatures_for_dataset(model, channel_mixer,
             xn = xn_b[b]; yn = yn_b[b]
             mu = mu_b[b]; lv = log_var_b[b]
 
-            patches = _patch_dispatch(xn, yn)
+            if _patch_signal_precomputed is not None:
+                patches = _patch_signal_precomputed(mu, lv, yn)
+            else:
+                patches = _patch_dispatch(xn, yn)
 
             sigs = []
             for (t1, t2) in patches:
@@ -449,9 +453,13 @@ class SignatureStandardizer:
         self.mean: Optional[torch.Tensor] = None
         self.std:  Optional[torch.Tensor] = None
 
-    def fit(self, sigs: torch.Tensor):
-        self.mean = sigs.mean(0)
-        self.std  = sigs.std(0).clamp(min=1e-6)
+    def fit(self, sigs: torch.Tensor, clip_percentile: float = 99.0):
+        # Fit on percentile-clipped values so outliers don't inflate std
+        lo = torch.quantile(sigs, (100 - clip_percentile) / 100.0, dim=0)
+        hi = torch.quantile(sigs, clip_percentile / 100.0, dim=0)
+        clipped = sigs.clamp(min=lo, max=hi)
+        self.mean = clipped.mean(0)
+        self.std  = clipped.std(0).clamp(min=1e-6)
 
     def transform(self, sigs: torch.Tensor) -> torch.Tensor:
         return (sigs - self.mean.to(sigs.device)) / self.std.to(sigs.device)
