@@ -1,4 +1,4 @@
-# ConceptTime
+# (NeurIPS'26) ConceptTime: Predictive Surprise as Self-Grounding Concept Bottleneck for Interpretable Time Series
 
 **Predictive Surprise as a Self-Grounding Concept Bottleneck for Interpretable Time Series**
 
