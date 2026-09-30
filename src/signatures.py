@@ -391,7 +391,7 @@ def extract_signatures_for_dataset(model, channel_mixer,
             return _patch_signal(xn.shape[0])
 
     # batch_size > 1: amortises channel_mixer + model launches across samples.
-    # requires fixed-length samples (true for all windowed datasets).
+    # requires fixed-length samples (true for windowed HAR/Epilepsy datasets).
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False,
                         num_workers=0, drop_last=False)
 

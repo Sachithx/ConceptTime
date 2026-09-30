@@ -11,7 +11,7 @@ Both take: concept sequence [B, K, M] → logits [B, n_classes]
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
+from typing import Optional
 
 
 # ── Shared positional embedding ────────────────────────────────────────────────
@@ -178,3 +178,85 @@ class BigramLinearClassifier(nn.Module):
         W_bi   = W_bi.permute(1, 2, 0)                            # [M, M, n_classes]
         return W_uni, W_bi
 
+
+# ── Black-box baseline (raw patches, no concepts) ─────────────────────────────
+
+class RawPatchTransformer(nn.Module):
+    """
+    Baseline: directly processes raw patches without going through concepts.
+    Input: [B, K, L_max, C] padded raw patches → class logits [B, n_classes].
+    Each patch is first pooled to a single vector, then treated like concept_seq.
+    """
+
+    def __init__(self, n_channels: int, K: int, n_classes: int,
+                 d_model: int = 64, n_layers: int = 2, n_head: int = 4,
+                 dropout: float = 0.1):
+        super().__init__()
+        self.patch_proj = nn.Linear(n_channels, d_model)
+        self.patch_pool = nn.AdaptiveAvgPool1d(1)   # pool over L
+        self.pos_emb    = PatchPositionalEmbedding(K, d_model)
+        self.blocks     = nn.ModuleList([
+            _ClassifierBlock(d_model, n_head, dropout) for _ in range(n_layers)
+        ])
+        self.ln_f  = nn.LayerNorm(d_model)
+        self.head  = nn.Linear(d_model, n_classes)
+
+    def forward(self, patches: torch.Tensor,
+                masks: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        patches: [B, K, L, C]
+        masks:   [B, K, L]  True = valid  (optional)
+        """
+        B, K, L, C = patches.shape
+        # encode each patch independently then pool
+        flat = patches.reshape(B * K, L, C)
+        proj = self.patch_proj(flat)         # [B*K, L, d]
+        pooled = proj.mean(dim=1)            # [B*K, d]  mean pool
+        x = pooled.reshape(B, K, -1)        # [B, K, d]
+
+        x = self.pos_emb(x)
+        for block in self.blocks:
+            x = block(x)
+        x = self.ln_f(x).mean(1)            # [B, d]
+        return self.head(x)
+
+
+# ── Full pipeline model (encoder → concept seq → classifier) ──────────────────
+
+class ConceptPipeline(nn.Module):
+    """
+    End-to-end: encoder + classifier in one nn.Module for joint fine-tuning.
+    The density model stays frozen outside this module.
+    """
+
+    def __init__(self, encoder, classifier):
+        super().__init__()
+        self.encoder    = encoder
+        self.classifier = classifier
+
+    def forward(self, patches: torch.Tensor,
+                masks: Optional[torch.Tensor] = None,
+                patch_dim: int = 1) -> torch.Tensor:
+        """
+        patches: [B, K, L, C]  — K patches per sample, each padded to L
+        masks:   [B, K, L]     — True = valid position
+
+        Returns: class logits [B, n_classes]
+        """
+        B, K, L, C = patches.shape
+        flat_patches = patches.reshape(B * K, L, C)
+        flat_masks   = masks.reshape(B * K, L) if masks is not None else None
+
+        q = self.encoder(flat_patches, flat_masks)   # [B*K, M]
+        concept_seq = q.reshape(B, K, -1)            # [B, K, M]
+
+        return self.classifier(concept_seq)           # [B, n_classes]
+
+    def encoder_concept_seq(self, patches: torch.Tensor,
+                             masks: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Returns [B, K, M] concept sequences without classifying."""
+        B, K, L, C = patches.shape
+        flat_p = patches.reshape(B * K, L, C)
+        flat_m = masks.reshape(B * K, L) if masks is not None else None
+        q = self.encoder(flat_p, flat_m)
+        return q.reshape(B, K, -1)

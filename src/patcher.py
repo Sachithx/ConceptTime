@@ -72,6 +72,15 @@ def get_patch_config(dataset: str, T: int, scale: str = None) -> dict:
     return {"K": 8, "L_min": 16, "L_max": 32, "burn_in": 10}
 
 
+# Sentinel that keeps the name importable but raises on access, pointing
+# callers to the new API: ppc = get_patch_config(dataset, T)
+class _RemovedDict(dict):
+    _MSG = "PATCH_CONFIGS removed — use get_patch_config(dataset, T) instead."
+    def __getitem__(self, _): raise RuntimeError(self._MSG)
+    def get(self, *_): raise RuntimeError(self._MSG)
+
+PATCH_CONFIGS = _RemovedDict()
+
 
 # ── DP segmentation core ──────────────────────────────────────────────────────
 
@@ -353,7 +362,7 @@ class GreedyDualThresholdPatcher:
 
     This directly mirrors the monotonicity-based greedy algorithm in EntroPE
     (patch_start_mask_from_entropy_with_monotonicity_adaptive in Patcher.py),
-    applied to ConceptTime's density model entropy signal so the backbone is matched.
+    applied to PRECEPT's density model entropy signal so the backbone is matched.
     """
 
     def __init__(self, model, channel_mixer,
@@ -485,3 +494,33 @@ class StaticPatcher:
         p = self.patch_signal(T)
         return [p for _ in range(B)]
 
+
+# ── Normalise-then-patch helper ───────────────────────────────────────────────
+
+@torch.no_grad()
+def normalize_signal(x: torch.Tensor, channel_mixer,
+                     channel_mean: torch.Tensor,
+                     channel_std: torch.Tensor,
+                     device: torch.device) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    x: [T, C] raw signal.
+    Returns x_norm, y_norm: [T-1, C] and [T-1, C] (shifted by 1).
+    """
+    x = x.to(device)
+    xn = (x - channel_mean) / channel_std
+    xn = channel_mixer(xn.unsqueeze(0).permute(0, 2, 1)).permute(0, 2, 1).squeeze(0)
+    return xn[:-1], xn[1:]
+
+
+@torch.no_grad()
+def normalize_batch(x_batch: torch.Tensor, y_batch: torch.Tensor,
+                    channel_mixer, channel_mean: torch.Tensor,
+                    channel_std: torch.Tensor, device: torch.device):
+    """x_batch, y_batch: [B, T, C]. Returns normalized versions."""
+    x_batch = x_batch.to(device)
+    y_batch = y_batch.to(device)
+    x_n = (x_batch - channel_mean) / channel_std
+    y_n = (y_batch - channel_mean) / channel_std
+    x_n = channel_mixer(x_n.permute(0, 2, 1)).permute(0, 2, 1)
+    y_n = channel_mixer(y_n.permute(0, 2, 1)).permute(0, 2, 1)
+    return x_n, y_n
