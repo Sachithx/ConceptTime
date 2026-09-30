@@ -16,18 +16,23 @@ If `import torch` raises `GLIBCXX_3.4.xx not found`, prefix commands with
 
 ## Data & checkpoints
 
+Data and checkpoints for HAR / Sleep-EDF are hosted on the HuggingFace Hub:
+**https://huggingface.co/datasets/sachithabey/ConceptTime**
+
 - **Epilepsy** — data (`dataset/Epilepsy/`) and checkpoints
-  (`checkpoints/Epilepsy/`) ship in this repo.
-- **UCI-HAR, Sleep-EDF** — download the test split + checkpoints from the
-  HuggingFace Hub:
+  (`checkpoints/Epilepsy/`) ship in this repo; nothing to download.
+- **UCI-HAR, Sleep-EDF** — download the test split + checkpoints from the Hub
+  (needs `huggingface_hub`, already in `requirements.txt`):
 
   ```bash
   python download_data.py                    # HAR + Sleep-EDF
   python download_data.py --datasets HAR     # one only
   ```
 
-  This writes `dataset/<D>/test.pt` and
-  `checkpoints/<D>/{gaussian_entropy_best,pipeline_best}.pt`.
+  This pulls from [`sachithabey/ConceptTime`](https://huggingface.co/datasets/sachithabey/ConceptTime)
+  and writes `dataset/<D>/test.pt` and
+  `checkpoints/<D>/{gaussian_entropy_best,pipeline_best}.pt` — the exact paths
+  the eval commands below expect.
 
 Each dataset uses **two** checkpoints: `gaussian_entropy_best.pt` (the density
 model) and `pipeline_best.pt` (concept space + classifier) — both are required
@@ -35,6 +40,10 @@ to evaluate.
 
 Data format: every `.pt` is a dict
 `{"samples": FloatTensor[N, C, T], "labels": LongTensor[N]}`.
+
+> The same Hub repo also archives **all** datasets (including FD-A/B/C/D, with
+> full train/val/test) and **all** trained checkpoints under `archive/`, for
+> retraining or exploration beyond the three headline datasets.
 
 ## Evaluate pretrained checkpoints
 
