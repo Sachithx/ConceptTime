@@ -79,7 +79,7 @@ pip install -r requirements.txt
 
 Requirements: PyTorch ≥ 2.0, NumPy, scikit-learn, tqdm. A GPU is recommended
 (especially for Sleep-EDF, whose sequences are long) but not required. Weights &
-Biases is optional — the training scripts run fine without it; pass `--no_wandb`.
+Biases are optional — the training scripts run fine without them; pass `--no_wandb`.
 
 **libstdc++ note.** Some conda + recent-PyTorch setups raise
 `GLIBCXX_3.4.xx not found` on `import torch`. If that happens, prefix any
@@ -89,7 +89,7 @@ command with the provided wrapper, which preloads the conda env's libstdc++:
 ./run.sh python src/evaluate.py ...
 ```
 
-Otherwise you can ignore `run.sh` and call `python` directly.
+Otherwise, you can ignore `run.sh` and call `python` directly.
 
 ---
 
@@ -174,21 +174,6 @@ python src/evaluate.py \
 `evaluate.py` prints test **accuracy** and **macro-F1** for each label-budget
 classifier stored in the checkpoint (1 %, 5 %, and full supervision).
 Signatures are recomputed on the fly, so no signature cache is needed.
-
-### Expected output (test split)
-
-Reproduced by running the commands above on the shipped checkpoints
-(RTX 6000 Ada).
-
-| Dataset | Config | Accuracy (Full) | Macro-F1 (Full) | Acc @1% | Acc @5% |
-|---------|--------|:---------------:|:---------------:|:-------:|:-------:|
-| Epilepsy   | surprise · surprise_full · M32  | 98.30 % | 97.37 % | 97.78 % | 97.52 % |
-| UCI-HAR    | surprise · moments_only · M512  | 86.09 % | 86.04 % | 72.99 % | 76.38 % |
-| Sleep-EDF  | residual · surprise_full · M128 | 74.51 % | 64.26 % | 68.42 % | 70.19 % |
-
-Patch signatures are recomputed at evaluation time, so small variation across
-hardware/seeds is expected: Epilepsy and HAR reproduce to within ±0.x %, while
-Sleep-EDF (residual boundaries over 3000-step sequences) may vary by ~1–2 %.
 
 ---
 
