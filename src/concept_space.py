@@ -52,22 +52,6 @@ def fit_gmm(sigs: np.ndarray, M: int, seed: int = 42,
     )
 
 
-def fit_hdbscan(sigs: np.ndarray, min_cluster_size: int = 20,
-                min_samples: int = 5) -> Tuple[np.ndarray, np.ndarray]:
-    """Returns centroids [M, D], labels [N] (-1 = noise)."""
-    try:
-        import hdbscan
-        clusterer = hdbscan.HDBSCAN(min_cluster_size=min_cluster_size,
-                                     min_samples=min_samples)
-        labels = clusterer.fit_predict(sigs)
-    except ImportError:
-        raise ImportError("Install hdbscan: pip install hdbscan")
-
-    unique = [l for l in sorted(set(labels.tolist())) if l >= 0]
-    centroids = np.stack([sigs[labels == l].mean(0) for l in unique]).astype(np.float32)
-    return centroids, labels
-
-
 # ── Concept prototype store ───────────────────────────────────────────────────
 
 class ConceptSpace:
@@ -110,11 +94,6 @@ class ConceptSpace:
             self.centroids   = torch.from_numpy(means_np)
             self.covariances = torch.from_numpy(covs_np)
 
-        elif algorithm == "hdbscan":
-            centroids_np, labels = fit_hdbscan(sigs_np, **kwargs)
-            self.M = centroids_np.shape[0]
-            self.centroids  = torch.from_numpy(centroids_np)
-            self.covariances = None
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}")
 

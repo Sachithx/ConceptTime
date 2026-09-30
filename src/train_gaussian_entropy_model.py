@@ -233,11 +233,6 @@ class Config:
     logvar_min   = -10.0
     logvar_max   =   4.0
     calib_weight = 0.01
-    # Backbone
-    backbone     = "transformer"   # "transformer" | "mamba"
-    d_state      = 16              # Mamba: SSM state dimension
-    d_conv       = 4               # Mamba: depthwise conv kernel width
-    d_expand     = 2               # Mamba: inner-dim expansion factor
 
     # Data
     root_path   = "./HAR"
@@ -547,15 +542,6 @@ def main():
     parser.add_argument("--dataset",   default="HAR",
                         choices=list(DATASET_CONFIGS.keys()),
                         help="Dataset to train on")
-    parser.add_argument("--backbone",  default="transformer",
-                        choices=["transformer", "mamba"],
-                        help="Density-model backbone")
-    parser.add_argument("--d_state",   type=int, default=16,
-                        help="Mamba SSM state dimension")
-    parser.add_argument("--d_conv",    type=int, default=4,
-                        help="Mamba depthwise-conv kernel width")
-    parser.add_argument("--d_expand",  type=int, default=2,
-                        help="Mamba inner-dim expansion factor")
     parser.add_argument("--data_root", default=None,
                         help="Override dataset root (used for immutable rebuttal subsets)")
     parser.add_argument("--save_path", default=None,
@@ -586,7 +572,7 @@ def main():
     cfg.seq_len        = dc["seq_len"]
     cfg.output_dir     = args.output_dir or dc["output_dir"]
     cfg.wandb_project  = dc["wandb_project"]
-    cfg.wandb_tags     = dc["wandb_tags"] + [args.backbone]
+    cfg.wandb_tags     = dc["wandb_tags"]
     cfg.device = torch.device(
         args.device if args.device else ("cuda" if torch.cuda.is_available() else "cpu")
     )
@@ -609,18 +595,7 @@ def main():
     if args.n_embd is not None:
         cfg.n_embd = args.n_embd
 
-    # Backbone config
-    cfg.backbone  = args.backbone
-    cfg.d_state   = args.d_state
-    cfg.d_conv    = args.d_conv
-    cfg.d_expand  = args.d_expand
-
-    # Separate checkpoint per backbone so both can coexist in output/
-    base = dc["save_path"]          # e.g. output/HAR/gaussian_entropy_best.pt
-    cfg.save_path = args.save_path or (
-        base.replace("_best.pt", f"_{args.backbone}_best.pt")
-        if args.backbone != "transformer" else base
-    )
+    cfg.save_path = args.save_path or dc["save_path"]   # output/<D>/gaussian_entropy_best.pt
 
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.save_path).parent.mkdir(parents=True, exist_ok=True)
@@ -654,10 +629,6 @@ def main():
         logvar_min   = cfg.logvar_min,
         logvar_max   = cfg.logvar_max,
         calib_weight = cfg.calib_weight,
-        backbone     = cfg.backbone,
-        d_state      = cfg.d_state,
-        d_conv       = cfg.d_conv,
-        d_expand     = cfg.d_expand,
     )
     model         = GaussianGPT(gpt_cfg).to(cfg.device)
     channel_mixer = ChannelMixer(n_channels=cfg.n_channels, dropout=0.1).to(cfg.device)
@@ -684,12 +655,9 @@ def main():
         tags    = cfg.wandb_tags,
         mode    = "disabled" if args.no_wandb else None,
         config  = {
-            "model":    {"backbone": cfg.backbone,
-                         "n_layer": cfg.n_layer, "n_head": cfg.n_head,
+            "model":    {"n_layer": cfg.n_layer, "n_head": cfg.n_head,
                          "n_embd": cfg.n_embd, "n_channels": cfg.n_channels,
-                         "dropout": cfg.dropout, "calib_weight": cfg.calib_weight,
-                         "d_state": cfg.d_state, "d_conv": cfg.d_conv,
-                         "d_expand": cfg.d_expand},
+                         "dropout": cfg.dropout, "calib_weight": cfg.calib_weight},
             "training": {"lr": cfg.lr, "epochs": cfg.epochs,
                          "batch_size": cfg.batch_size, "patience": cfg.patience,
                          "seed": args.seed, "data_root": cfg.root_path,

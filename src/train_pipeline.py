@@ -42,15 +42,14 @@ except ImportError:  # W&B is optional; use --no_wandb to skip logging.
 
 from GaussianEntropyModel import GaussianGPT, GaussianGPTConfig
 from train_gaussian_entropy_model import TimeSeriesDataset, ChannelMixer, DATASET_CONFIGS
-from patcher import EntropyPatcher, StaticPatcher, GreedyDualThresholdPatcher, normalize_batch, get_patch_config
+from patcher import EntropyPatcher, StaticPatcher, normalize_batch, get_patch_config
 from signatures import (compute_marginal, extract_signatures_for_dataset,
                          SignatureStandardizer, signature_dim)
 from concept_space import ConceptSpace, sweep_M
 from concept_encoder import (ConceptEncoder, PatchDataset, patch_collate_fn,
                               augment_batch_patches, align_loss, sparse_loss,
                               stable_loss, build_patch_dataset)
-from classifier import (TransformerClassifier, SparseLinearClassifier,
-                         BigramLinearClassifier, ConceptPipeline, RawPatchTransformer)
+from classifier import TransformerClassifier, SparseLinearClassifier
 
 
 # ── Dataset configs (augment existing DATASET_CONFIGS) ────────────────────────
@@ -101,7 +100,12 @@ def load_density_model(ckpt_path: str, device: torch.device):
     sd   = ckpt["model_state_dict"]
 
     if "model_config" in ckpt:
-        cfg = GaussianGPTConfig(**ckpt["model_config"])
+        # Keep only fields the current config defines (older checkpoints may carry
+        # legacy keys such as backbone/d_state from removed ablation options).
+        from dataclasses import fields
+        _valid = {f.name for f in fields(GaussianGPTConfig)}
+        cfg = GaussianGPTConfig(**{k: v for k, v in ckpt["model_config"].items()
+                                   if k in _valid})
     else:
         n_embd, n_channels = sd["transformer.input_proj.weight"].shape
         block_size          = sd["transformer.wpe.weight"].shape[0]
@@ -417,8 +421,8 @@ def main():
     parser.add_argument("--ckpt",       default=None,
                         help="Density model checkpoint (defaults to dataset save_path)")
     parser.add_argument("--patcher",    default="entropy",
-                        choices=["entropy", "static", "greedy"],
-                        help="entropy: DP segmentation  static: fixed-window  greedy: dual-threshold EntroPE-style")
+                        choices=["entropy", "static"],
+                        help="entropy: DP segmentation  static: fixed-window (ablation)")
     parser.add_argument("--patch_scale", default=None,
                         choices=["xs", "s", "m", "l", "xl"],
                         help="Patch scale override (xs=tiny … xl=large). "
@@ -439,7 +443,7 @@ def main():
     parser.add_argument("--sweep_M",    action="store_true",
                         help="Sweep M and report metrics before training")
     parser.add_argument("--cluster_algo", default="gmm",
-                        choices=["kmeans", "gmm", "hdbscan"])
+                        choices=["kmeans", "gmm"])
     parser.add_argument("--sig_mode",   default=None, nargs="+",
                         metavar="MODE",
                         help="Signature mode(s): full | entropy_only | moments_only | "
@@ -447,7 +451,7 @@ def main():
                              "residual_morphology | surprise_trajectory | surprise_full. "
                              "Multiple modes are concatenated. (default: from PIPELINE_CONFIGS)")
     parser.add_argument("--classifier_type", default="transformer",
-                        choices=["transformer", "linear", "bigram"])
+                        choices=["transformer", "linear"])
 
     # Concept-encoder loss weights
     parser.add_argument("--lambda_align", type=float, default=None,
@@ -782,10 +786,6 @@ def main():
                                           K=K, L_min=L_min, L_max=L_max,
                                           burn_in=burn_in,
                                           mode=args.boundary_mode)
-            elif args.patcher == "greedy":
-                patcher = GreedyDualThresholdPatcher(density_model, channel_mixer,
-                                                      K=K, L_min=L_min, burn_in=burn_in,
-                                                      mode=args.boundary_mode)
             else:
                 patcher = StaticPatcher(K=K)
     else:
@@ -803,10 +803,6 @@ def main():
                                       K=K, L_min=L_min, L_max=L_max,
                                       burn_in=burn_in,
                                       mode=args.boundary_mode)
-        elif args.patcher == "greedy":
-            patcher = GreedyDualThresholdPatcher(density_model, channel_mixer,
-                                                  K=K, L_min=L_min, burn_in=burn_in,
-                                                  mode=args.boundary_mode)
         else:
             patcher = StaticPatcher(K=K)
 
@@ -1044,10 +1040,6 @@ def main():
             cls = TransformerClassifier(
                 M=args.M, K=K, n_classes=n_classes,
                 d_model=max(args.enc_d_model, 64), n_layers=2, n_head=4,
-            ).to(device)
-        elif args.classifier_type == "bigram":
-            cls = BigramLinearClassifier(
-                M=args.M, K=K, n_classes=n_classes, l1_lambda=1e-3,
             ).to(device)
         else:
             cls = SparseLinearClassifier(
