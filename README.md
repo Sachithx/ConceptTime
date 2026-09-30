@@ -264,15 +264,6 @@ Signature modes (`--sig_mode`): `surprise_full` (default), `full`,
 
 ## Citation
 
-If you use this code, please cite:
-
-```bibtex
-@inproceedings{concepttime,
-  title     = {Predictive Surprise as a Self-Grounding Concept Bottleneck for Interpretable Time Series},
-  author    = {},
-  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
-  year      = {2025}
-}
-```
+Coming soon!
 
 Released under the Apache License 2.0 (see [LICENSE](LICENSE)).
