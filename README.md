@@ -31,10 +31,10 @@ Data and checkpoints for HAR / Sleep-EDF are hosted on the HuggingFace Hub:
 
   This pulls from [`sachithabey/ConceptTime`](https://huggingface.co/datasets/sachithabey/ConceptTime)
   and writes `dataset/<D>/test.pt` and
-  `checkpoints/<D>/{gaussian_entropy_best,pipeline_best}.pt` — the exact paths
+  `checkpoints/<D>/{density_model_best,pipeline_best}.pt` — the exact paths
   the eval commands below expect.
 
-Each dataset uses **two** checkpoints: `gaussian_entropy_best.pt` (the density
+Each dataset uses **two** checkpoints: `density_model_best.pt` (the density
 model) and `pipeline_best.pt` (concept space + classifier) — both are required
 to evaluate.
 
@@ -52,15 +52,15 @@ Run from the repo root:
 ```bash
 python src/evaluate.py --dataset Epilepsy \
     --artifact checkpoints/Epilepsy/pipeline_best.pt \
-    --density  checkpoints/Epilepsy/gaussian_entropy_best.pt --split test
+    --density  checkpoints/Epilepsy/density_model_best.pt --split test
 
 python src/evaluate.py --dataset HAR \
     --artifact checkpoints/HAR/pipeline_best.pt \
-    --density  checkpoints/HAR/gaussian_entropy_best.pt --split test
+    --density  checkpoints/HAR/density_model_best.pt --split test
 
 python src/evaluate.py --dataset SLeep-EDF \
     --artifact checkpoints/SLeep-EDF/pipeline_best.pt \
-    --density  checkpoints/SLeep-EDF/gaussian_entropy_best.pt --split test
+    --density  checkpoints/SLeep-EDF/density_model_best.pt --split test
 ```
 
 Each run prints accuracy and macro-F1 at 1% / 5% / full label budgets.
@@ -71,8 +71,8 @@ Two stages, from the repo root:
 
 ```bash
 # 1) density model
-python src/train_gaussian_entropy_model.py --dataset Epilepsy --no_wandb
-#    -> output/Epilepsy/gaussian_entropy_best.pt
+python src/train_density_model.py --dataset Epilepsy --no_wandb
+#    -> output/Epilepsy/density_model_best.pt
 
 # 2) concept pipeline
 python src/train_pipeline.py --dataset Epilepsy --M 32 \
@@ -85,7 +85,7 @@ Then evaluate what you trained:
 ```bash
 python src/evaluate.py --dataset Epilepsy \
     --artifact output/Epilepsy/pipeline/<file written above>.pt \
-    --density  output/Epilepsy/gaussian_entropy_best.pt --split test
+    --density  output/Epilepsy/density_model_best.pt --split test
 ```
 
 Training writes under `output/`, so the released `checkpoints/` are left

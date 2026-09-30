@@ -32,12 +32,12 @@ HF_REPO_TYPE = "dataset"
 FILES = {
     "HAR": [
         "dataset/HAR/test.pt",
-        "checkpoints/HAR/gaussian_entropy_best.pt",
+        "checkpoints/HAR/density_model_best.pt",
         "checkpoints/HAR/pipeline_best.pt",
     ],
     "SLeep-EDF": [
         "dataset/SLeep-EDF/test.pt",
-        "checkpoints/SLeep-EDF/gaussian_entropy_best.pt",
+        "checkpoints/SLeep-EDF/density_model_best.pt",
         "checkpoints/SLeep-EDF/pipeline_best.pt",
     ],
 }

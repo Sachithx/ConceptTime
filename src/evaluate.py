@@ -10,7 +10,7 @@ Example
     python src/evaluate.py \
         --dataset Epilepsy \
         --artifact checkpoints/Epilepsy/pipeline_best.pt \
-        --density  checkpoints/Epilepsy/gaussian_entropy_best.pt \
+        --density  checkpoints/Epilepsy/density_model_best.pt \
         --split    test
 
 What a checkpoint contains / needs
@@ -18,7 +18,7 @@ What a checkpoint contains / needs
 The pipeline artifact (`pipeline_best.pt`) is self-contained for the concept
 space, the signature standardizer, the (optional) patch encoder, and the
 classifier(s). To run inference you additionally need:
-  1. the per-dataset density model  (`gaussian_entropy_best.pt`), used by the
+  1. the per-dataset density model  (`density_model_best.pt`), used by the
      entropy patcher and to compute predictive-surprise signatures; and
   2. the data split you want to score (e.g. `dataset/<Dataset>/test.pt`).
 Signatures are recomputed on the fly (no signature cache required).
@@ -32,9 +32,9 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import accuracy_score, f1_score
 
-from train_gaussian_entropy_model import TimeSeriesDataset, DATASET_CONFIGS
+from train_density_model import TimeSeriesDataset, DATASET_CONFIGS
 from train_pipeline import load_density_model
-from patcher import EntropyPatcher, StaticPatcher, get_patch_config
+from patcher import SurprisePatcher, StaticPatcher, get_patch_config
 from signatures import extract_signatures_for_dataset, SignatureStandardizer
 from concept_space import ConceptSpace
 from concept_encoder import ConceptEncoder, build_patch_dataset, patch_collate_fn
@@ -103,7 +103,7 @@ def main():
     p = argparse.ArgumentParser(description="Evaluate a trained ConceptTime pipeline.")
     p.add_argument("--dataset", required=True, choices=list(DATASET_CONFIGS.keys()))
     p.add_argument("--artifact", required=True, help="Path to pipeline_best.pt")
-    p.add_argument("--density", required=True, help="Path to gaussian_entropy_best.pt")
+    p.add_argument("--density", required=True, help="Path to density_model_best.pt")
     p.add_argument("--split", default="test", choices=["train", "val", "test"])
     p.add_argument("--data_root", default="./dataset",
                    help="Folder containing <data_root>/<Dataset>/<split>.pt")
@@ -152,7 +152,7 @@ def main():
     # ── Patcher ───────────────────────────────────────────────────────────────
     ppc = get_patch_config(args.dataset, seq_len)
     if art["patcher"] == "entropy":
-        patcher = EntropyPatcher(density_model, channel_mixer, K=K,
+        patcher = SurprisePatcher(density_model, channel_mixer, K=K,
                                  L_min=ppc["L_min"], burn_in=ppc["burn_in"],
                                  mode=art.get("boundary_mode", "entropy"))
     else:

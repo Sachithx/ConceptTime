@@ -40,9 +40,9 @@ except ImportError:  # W&B is optional; use --no_wandb to skip logging.
         def finish(self, *a, **k): pass
     wandb = _WandbStub()
 
-from GaussianEntropyModel import GaussianGPT, GaussianGPTConfig
-from train_gaussian_entropy_model import TimeSeriesDataset, ChannelMixer, DATASET_CONFIGS
-from patcher import EntropyPatcher, StaticPatcher, normalize_batch, get_patch_config
+from density_model import GaussianDensityModel, GaussianDensityConfig
+from train_density_model import TimeSeriesDataset, ChannelMixer, DATASET_CONFIGS
+from patcher import SurprisePatcher, StaticPatcher, normalize_batch, get_patch_config
 from signatures import (compute_marginal, extract_signatures_for_dataset,
                          SignatureStandardizer, signature_dim)
 from concept_space import ConceptSpace, sweep_M
@@ -103,8 +103,8 @@ def load_density_model(ckpt_path: str, device: torch.device):
         # Keep only fields the current config defines (older checkpoints may carry
         # legacy keys such as backbone/d_state from removed ablation options).
         from dataclasses import fields
-        _valid = {f.name for f in fields(GaussianGPTConfig)}
-        cfg = GaussianGPTConfig(**{k: v for k, v in ckpt["model_config"].items()
+        _valid = {f.name for f in fields(GaussianDensityConfig)}
+        cfg = GaussianDensityConfig(**{k: v for k, v in ckpt["model_config"].items()
                                    if k in _valid})
     else:
         n_embd, n_channels = sd["transformer.input_proj.weight"].shape
@@ -112,10 +112,10 @@ def load_density_model(ckpt_path: str, device: torch.device):
         n_layer             = sum(1 for k in sd
                                   if k.startswith("transformer.h.")
                                   and k.endswith(".ln_1.weight"))
-        cfg = GaussianGPTConfig(block_size=block_size, n_channels=n_channels,
+        cfg = GaussianDensityConfig(block_size=block_size, n_channels=n_channels,
                                 n_layer=n_layer, n_embd=n_embd)
 
-    model = GaussianGPT(cfg).to(device)
+    model = GaussianDensityModel(cfg).to(device)
     model.load_state_dict(sd)
     model.eval()
     for p in model.parameters():
@@ -782,7 +782,7 @@ def main():
         if not args.direct_sig:
             print(f"  Rebuilding patcher for encoder training…")
             if args.patcher == "entropy":
-                patcher = EntropyPatcher(density_model, channel_mixer,
+                patcher = SurprisePatcher(density_model, channel_mixer,
                                           K=K, L_min=L_min, L_max=L_max,
                                           burn_in=burn_in,
                                           mode=args.boundary_mode)
@@ -799,7 +799,7 @@ def main():
         # ── Phase 3: Build patcher ────────────────────────────────────────────
         print(f"\n── Phase 3: Patcher = {args.patcher} ──────────────────────")
         if args.patcher == "entropy":
-            patcher = EntropyPatcher(density_model, channel_mixer,
+            patcher = SurprisePatcher(density_model, channel_mixer,
                                       K=K, L_min=L_min, L_max=L_max,
                                       burn_in=burn_in,
                                       mode=args.boundary_mode)

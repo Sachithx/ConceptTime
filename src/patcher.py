@@ -2,7 +2,7 @@
 patcher.py — Phase 3: Patch boundary detection from a frozen density model.
 
 Two patchers with identical interface:
-  EntropyPatcher  — entropy-guided DP segmentation
+  SurprisePatcher  — surprise-guided DP segmentation
   StaticPatcher   — fixed-window baseline (for ablation)
 
 Interface: patcher(signal_H_or_raw) → list of (start, end) index tuples
@@ -257,14 +257,14 @@ def boundary_signal_from_precomputed(mu: torch.Tensor, log_var: torch.Tensor,
         raise ValueError(f"Unknown boundary mode: {mode}")
 
 
-# ── EntropyPatcher ────────────────────────────────────────────────────────────
+# ── SurprisePatcher ────────────────────────────────────────────────────────────
 
-class EntropyPatcher:
+class SurprisePatcher:
     """
     Entropy-guided patcher using DP segmentation.
 
     Usage:
-        patcher = EntropyPatcher(model, channel_mixer, dataset_cfg)
+        patcher = SurprisePatcher(model, channel_mixer, dataset_cfg)
         patches = patcher.patch_signal(x_norm, y_norm)  # [(start, end), ...]
     """
 

@@ -1,5 +1,5 @@
 """
-GaussianGPT — a causal Gaussian density (world) model for time series.
+GaussianDensityModel — a causal Gaussian density (world) model for time series.
 
 At each timestep it predicts the parameters (mean μ and log-variance) of a
 Gaussian over the next continuous value, per channel:
@@ -116,7 +116,7 @@ class Block(nn.Module):
 
 
 # ============================================================================
-# GaussianGPT — continuous predictive density, no tokenizer required
+# GaussianDensityModel — continuous predictive density, no tokenizer required
 # ============================================================================
 #
 # Architecture vs a discrete GPT LM:
@@ -127,7 +127,7 @@ class Block(nn.Module):
 #   - Attention / MLP / LayerNorm / positional embedding: identical to a GPT.
 
 @dataclass
-class GaussianGPTConfig:
+class GaussianDensityConfig:
     block_size:   int   = 127
     n_channels:   int   = 1       # number of input/output sensor channels
     n_layer:      int   = 4
@@ -140,7 +140,7 @@ class GaussianGPTConfig:
     calib_weight: float = 0.01
 
 
-class GaussianGPT(nn.Module):
+class GaussianDensityModel(nn.Module):
     """
     Causal GPT that jointly predicts μ_{t+1} and log σ²_{t+1} for all C channels.
 
@@ -157,7 +157,7 @@ class GaussianGPT(nn.Module):
     so that absolute amplitude information is preserved across samples.
     """
 
-    def __init__(self, config: GaussianGPTConfig):
+    def __init__(self, config: GaussianDensityConfig):
         super().__init__()
         self.config = config
         C = config.n_channels
@@ -183,7 +183,7 @@ class GaussianGPT(nn.Module):
         nn.init.constant_(self.logvar_head.bias, 0.5)
 
         total = sum(p.numel() for p in self.parameters())
-        print(f"GaussianGPT[transformer(n_head={config.n_head})]: {total:,} params  "
+        print(f"GaussianDensityModel[transformer(n_head={config.n_head})]: {total:,} params  "
               f"(n_layer={config.n_layer} n_embd={config.n_embd} n_channels={C})")
 
     def _run_transformer(self, x: torch.Tensor) -> torch.Tensor:

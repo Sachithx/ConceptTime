@@ -1,7 +1,7 @@
 """
 train_gaussian_entropy.py
 ─────────────────────────
-Trains GaussianGPT + ChannelMixer on HAR for entropy-guided patch segmentation.
+Trains GaussianDensityModel + ChannelMixer on HAR for surprise-guided patch segmentation.
 
 Key differences vs the old discrete GPT (train_entropy_model.py):
   - No tokenizer: model receives raw normalised floats directly
@@ -11,7 +11,7 @@ Key differences vs the old discrete GPT (train_entropy_model.py):
   - Loss: Gaussian NLL + calibration regularization
   - Entropy: analytic 0.5*(1 + log(2pi*e*sigma^2)) averaged over channels
 
-Checkpoint saved to output/HAR/gaussian_entropy_best.pt with keys:
+Checkpoint saved to output/HAR/density_model_best.pt with keys:
   epoch, model_state_dict, channel_mixer_state_dict, val_loss,
   channel_mean, channel_std, n_channels, block_size
 """
@@ -40,7 +40,7 @@ except ImportError:  # W&B is optional; use --no_wandb to skip logging.
 import math
 import numpy as np
 
-from GaussianEntropyModel import GaussianGPT, GaussianGPTConfig
+from density_model import GaussianDensityModel, GaussianDensityConfig
 
 # ── Per-dataset configuration ─────────────────────────────────────────────────
 DATASET_CONFIGS = {
@@ -49,63 +49,63 @@ DATASET_CONFIGS = {
         "n_channels":     9,
         "seq_len":        127,
         "output_dir":     "output/HAR",
-        "save_path":      "output/HAR/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - HAR Gaussian",
-        "wandb_tags":     ["gaussian", "HAR", "entropy", "GaussianGPT"],
+        "save_path":      "output/HAR/density_model_best.pt",
+        "wandb_project":  "Density Model - HAR Gaussian",
+        "wandb_tags":     ["gaussian", "HAR", "surprise", "GaussianDensityModel"],
     },
     "Epilepsy": {
         "root_path":      "./dataset/Epilepsy",
         "n_channels":     1,
         "seq_len":        177,
         "output_dir":     "output/Epilepsy",
-        "save_path":      "output/Epilepsy/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - Epilepsy Gaussian",
-        "wandb_tags":     ["gaussian", "Epilepsy", "entropy", "GaussianGPT"],
+        "save_path":      "output/Epilepsy/density_model_best.pt",
+        "wandb_project":  "Density Model - Epilepsy Gaussian",
+        "wandb_tags":     ["gaussian", "Epilepsy", "surprise", "GaussianDensityModel"],
     },
     "SLeep-EDF": {
         "root_path":      "./dataset/SLeep-EDF",
         "n_channels":     1,
         "seq_len":        2999,
         "output_dir":     "output/SLeep-EDF",
-        "save_path":      "output/SLeep-EDF/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - SLeep-EDF Gaussian",
-        "wandb_tags":     ["gaussian", "SLeep-EDF", "entropy", "GaussianGPT"],
+        "save_path":      "output/SLeep-EDF/density_model_best.pt",
+        "wandb_project":  "Density Model - SLeep-EDF Gaussian",
+        "wandb_tags":     ["gaussian", "SLeep-EDF", "surprise", "GaussianDensityModel"],
     },
     "FD-A": {
         "root_path":      "./dataset/FD-A",
         "n_channels":     1,
         "seq_len":        5119,
         "output_dir":     "output/FD-A",
-        "save_path":      "output/FD-A/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - FD Gaussian",
-        "wandb_tags":     ["gaussian", "FD-A", "entropy", "GaussianGPT"],
+        "save_path":      "output/FD-A/density_model_best.pt",
+        "wandb_project":  "Density Model - FD Gaussian",
+        "wandb_tags":     ["gaussian", "FD-A", "surprise", "GaussianDensityModel"],
     },
     "FD-B": {
         "root_path":      "./dataset/FD-B",
         "n_channels":     1,
         "seq_len":        5119,
         "output_dir":     "output/FD-B",
-        "save_path":      "output/FD-B/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - FD Gaussian",
-        "wandb_tags":     ["gaussian", "FD-B", "entropy", "GaussianGPT"],
+        "save_path":      "output/FD-B/density_model_best.pt",
+        "wandb_project":  "Density Model - FD Gaussian",
+        "wandb_tags":     ["gaussian", "FD-B", "surprise", "GaussianDensityModel"],
     },
     "FD-C": {
         "root_path":      "./dataset/FD-C",
         "n_channels":     1,
         "seq_len":        5119,
         "output_dir":     "output/FD-C",
-        "save_path":      "output/FD-C/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - FD Gaussian",
-        "wandb_tags":     ["gaussian", "FD-C", "entropy", "GaussianGPT"],
+        "save_path":      "output/FD-C/density_model_best.pt",
+        "wandb_project":  "Density Model - FD Gaussian",
+        "wandb_tags":     ["gaussian", "FD-C", "surprise", "GaussianDensityModel"],
     },
     "FD-D": {
         "root_path":      "./dataset/FD-D",
         "n_channels":     1,
         "seq_len":        5119,
         "output_dir":     "output/FD-D",
-        "save_path":      "output/FD-D/gaussian_entropy_best.pt",
-        "wandb_project":  "Entropy Model - FD Gaussian",
-        "wandb_tags":     ["gaussian", "FD-D", "entropy", "GaussianGPT"],
+        "save_path":      "output/FD-D/density_model_best.pt",
+        "wandb_project":  "Density Model - FD Gaussian",
+        "wandb_tags":     ["gaussian", "FD-D", "surprise", "GaussianDensityModel"],
     },
     # ── UEA/UCR archive datasets (preprocessed by preprocess_uea_datasets.py) ─
     "EthanolConcentration": {
@@ -113,18 +113,18 @@ DATASET_CONFIGS = {
         "n_channels":    3,
         "seq_len":       1750,
         "output_dir":    "output/EthanolConcentration",
-        "save_path":     "output/EthanolConcentration/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - EthanolConcentration Gaussian",
-        "wandb_tags":    ["gaussian", "EthanolConcentration", "entropy", "GaussianGPT"],
+        "save_path":     "output/EthanolConcentration/density_model_best.pt",
+        "wandb_project": "Density Model - EthanolConcentration Gaussian",
+        "wandb_tags":    ["gaussian", "EthanolConcentration", "surprise", "GaussianDensityModel"],
     },
     "FaceDetection": {
         "root_path":     "./dataset/FaceDetection",
         "n_channels":    144,
         "seq_len":       61,
         "output_dir":    "output/FaceDetection",
-        "save_path":     "output/FaceDetection/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - FaceDetection Gaussian",
-        "wandb_tags":    ["gaussian", "FaceDetection", "entropy", "GaussianGPT"],
+        "save_path":     "output/FaceDetection/density_model_best.pt",
+        "wandb_project": "Density Model - FaceDetection Gaussian",
+        "wandb_tags":    ["gaussian", "FaceDetection", "surprise", "GaussianDensityModel"],
     },
     "Handwriting": {
         "root_path":     "./dataset/Handwriting",
@@ -132,72 +132,72 @@ DATASET_CONFIGS = {
         "seq_len":       151,
         "epochs":       200,  # smaller dataset benefits from more epochs
         "output_dir":    "output/Handwriting",
-        "save_path":     "output/Handwriting/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - Handwriting Gaussian",
-        "wandb_tags":    ["gaussian", "Handwriting", "entropy", "GaussianGPT"],
+        "save_path":     "output/Handwriting/density_model_best.pt",
+        "wandb_project": "Density Model - Handwriting Gaussian",
+        "wandb_tags":    ["gaussian", "Handwriting", "surprise", "GaussianDensityModel"],
     },
     "Heartbeat": {
         "root_path":     "./dataset/Heartbeat",
         "n_channels":    61,
         "seq_len":       404,
         "output_dir":    "output/Heartbeat",
-        "save_path":     "output/Heartbeat/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - Heartbeat Gaussian",
-        "wandb_tags":    ["gaussian", "Heartbeat", "entropy", "GaussianGPT"],
+        "save_path":     "output/Heartbeat/density_model_best.pt",
+        "wandb_project": "Density Model - Heartbeat Gaussian",
+        "wandb_tags":    ["gaussian", "Heartbeat", "surprise", "GaussianDensityModel"],
     },
     "JapaneseVowels": {
         "root_path":     "./dataset/JapaneseVowels",
         "n_channels":    12,
         "seq_len":       28,
         "output_dir":    "output/JapaneseVowels",
-        "save_path":     "output/JapaneseVowels/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - JapaneseVowels Gaussian",
-        "wandb_tags":    ["gaussian", "JapaneseVowels", "entropy", "GaussianGPT"],
+        "save_path":     "output/JapaneseVowels/density_model_best.pt",
+        "wandb_project": "Density Model - JapaneseVowels Gaussian",
+        "wandb_tags":    ["gaussian", "JapaneseVowels", "surprise", "GaussianDensityModel"],
     },
     "PEMS-SF": {
         "root_path":     "./dataset/PEMS-SF",
         "n_channels":    963,
         "seq_len":       143,
         "output_dir":    "output/PEMS-SF",
-        "save_path":     "output/PEMS-SF/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - PEMS-SF Gaussian",
-        "wandb_tags":    ["gaussian", "PEMS-SF", "entropy", "GaussianGPT"],
+        "save_path":     "output/PEMS-SF/density_model_best.pt",
+        "wandb_project": "Density Model - PEMS-SF Gaussian",
+        "wandb_tags":    ["gaussian", "PEMS-SF", "surprise", "GaussianDensityModel"],
     },
     "SelfRegulationSCP1": {
         "root_path":     "./dataset/SelfRegulationSCP1",
         "n_channels":    6,
         "seq_len":       895,
         "output_dir":    "output/SelfRegulationSCP1",
-        "save_path":     "output/SelfRegulationSCP1/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - SelfRegulationSCP1 Gaussian",
-        "wandb_tags":    ["gaussian", "SelfRegulationSCP1", "entropy", "GaussianGPT"],
+        "save_path":     "output/SelfRegulationSCP1/density_model_best.pt",
+        "wandb_project": "Density Model - SelfRegulationSCP1 Gaussian",
+        "wandb_tags":    ["gaussian", "SelfRegulationSCP1", "surprise", "GaussianDensityModel"],
     },
     "SelfRegulationSCP2": {
         "root_path":     "./dataset/SelfRegulationSCP2",
         "n_channels":    7,
         "seq_len":       1151,
         "output_dir":    "output/SelfRegulationSCP2",
-        "save_path":     "output/SelfRegulationSCP2/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - SelfRegulationSCP2 Gaussian",
-        "wandb_tags":    ["gaussian", "SelfRegulationSCP2", "entropy", "GaussianGPT"],
+        "save_path":     "output/SelfRegulationSCP2/density_model_best.pt",
+        "wandb_project": "Density Model - SelfRegulationSCP2 Gaussian",
+        "wandb_tags":    ["gaussian", "SelfRegulationSCP2", "surprise", "GaussianDensityModel"],
     },
     "SpokenArabicDigits": {
         "root_path":     "./dataset/SpokenArabicDigits",
         "n_channels":    13,
         "seq_len":       92,
         "output_dir":    "output/SpokenArabicDigits",
-        "save_path":     "output/SpokenArabicDigits/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - SpokenArabicDigits Gaussian",
-        "wandb_tags":    ["gaussian", "SpokenArabicDigits", "entropy", "GaussianGPT"],
+        "save_path":     "output/SpokenArabicDigits/density_model_best.pt",
+        "wandb_project": "Density Model - SpokenArabicDigits Gaussian",
+        "wandb_tags":    ["gaussian", "SpokenArabicDigits", "surprise", "GaussianDensityModel"],
     },
     "UWaveGestureLibrary": {
         "root_path":     "./dataset/UWaveGestureLibrary",
         "n_channels":    3,
         "seq_len":       314,
         "output_dir":    "output/UWaveGestureLibrary",
-        "save_path":     "output/UWaveGestureLibrary/gaussian_entropy_best.pt",
-        "wandb_project": "Entropy Model - UWaveGestureLibrary Gaussian",
-        "wandb_tags":    ["gaussian", "UWaveGestureLibrary", "entropy", "GaussianGPT"],
+        "save_path":     "output/UWaveGestureLibrary/density_model_best.pt",
+        "wandb_project": "Density Model - UWaveGestureLibrary Gaussian",
+        "wandb_tags":    ["gaussian", "UWaveGestureLibrary", "surprise", "GaussianDensityModel"],
     },
 }
 
@@ -256,11 +256,11 @@ class Config:
 
     # Output
     output_dir = "output/HAR"
-    save_path  = "output/HAR/gaussian_entropy_best.pt"
+    save_path  = "output/HAR/density_model_best.pt"
 
     # W&B
-    wandb_project = "Entropy Model - HAR Gaussian"
-    wandb_tags    = ["gaussian", "HAR", "entropy", "GaussianGPT"]
+    wandb_project = "Density Model - HAR Gaussian"
+    wandb_tags    = ["gaussian", "HAR", "surprise", "GaussianDensityModel"]
 
 
 # ============================================================================
@@ -371,7 +371,7 @@ def preprocess(x, y, channel_mixer, channel_mean, channel_std, device):
     x, y:          [B, T, C]
     channel_mean:  [C]  dataset-level mean (computed once on train set)
     channel_std:   [C]  dataset-level std  (computed once on train set)
-    Returns x_norm, y_norm: [B, T, C] normalised floats ready for GaussianGPT
+    Returns x_norm, y_norm: [B, T, C] normalised floats ready for GaussianDensityModel
 
     Order: normalise FIRST (so input to mixer has unit std per channel),
     then apply ChannelMixer.  The mixer's LayerNorm residual adds ~unit-std
@@ -595,7 +595,7 @@ def main():
     if args.n_embd is not None:
         cfg.n_embd = args.n_embd
 
-    cfg.save_path = args.save_path or dc["save_path"]   # output/<D>/gaussian_entropy_best.pt
+    cfg.save_path = args.save_path or dc["save_path"]   # output/<D>/density_model_best.pt
 
     Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
     Path(cfg.save_path).parent.mkdir(parents=True, exist_ok=True)
@@ -618,7 +618,7 @@ def main():
     channel_mean, channel_std = compute_channel_stats(train_ds, cfg.device)
 
     # ── Model ─────────────────────────────────────────────────────────────────
-    gpt_cfg = GaussianGPTConfig(
+    gpt_cfg = GaussianDensityConfig(
         block_size   = cfg.seq_len,
         n_channels   = cfg.n_channels,
         n_layer      = cfg.n_layer,
@@ -630,7 +630,7 @@ def main():
         logvar_max   = cfg.logvar_max,
         calib_weight = cfg.calib_weight,
     )
-    model         = GaussianGPT(gpt_cfg).to(cfg.device)
+    model         = GaussianDensityModel(gpt_cfg).to(cfg.device)
     channel_mixer = ChannelMixer(n_channels=cfg.n_channels, dropout=0.1).to(cfg.device)
 
     # ── Optimiser ────────────────────────────────────────────────────────────
