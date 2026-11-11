@@ -1,5 +1,12 @@
 # (NeurIPS'26) ConceptTime: Predictive Surprise as Self-Grounding Concept Bottleneck for Interpretable Time Series
 
+[![arXiv](https://img.shields.io/badge/arXiv-2611.12955-b31b1b?logo=arxiv)](https://arxiv.org/abs/2611.12955)
+[![Venue](https://img.shields.io/badge/NeurIPS-2026-4b44ce)](https://neurips.cc/virtual/2026/loc/sydney/poster/153183)
+[![Project Page](https://img.shields.io/badge/Project-Website-2176BC?logo=GoogleChrome)](https://sachithx.github.io/research/concepttime.html)
+[![HF Daily Paper](https://img.shields.io/badge/HF%20Daily%20Paper-2611.12955-FFD21E.svg?logo=huggingface)](https://huggingface.co/papers/2611.12955)
+[![HF Dataset](https://img.shields.io/badge/HuggingFace-Datasets-FFD21E.svg?logo=huggingface)](https://huggingface.co/datasets/sachithabey/ConceptTime)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green)](https://github.com/Sachithx/ConceptTime/blob/main/LICENSE)
+
 Interpretable time-series classification with a predictive-surprise concept
 bottleneck. Code and checkpoints to train the Epilepsy pipeline end-to-end and
 to evaluate pretrained checkpoints on Epilepsy, UCI-HAR, and Sleep-EDF.
