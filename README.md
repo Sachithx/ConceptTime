@@ -104,11 +104,12 @@ untouched. To train HAR or Sleep-EDF, place their `train.pt` / `val.pt` under
 If you found this work useful for you, please consider citing it.
 
 ```bibtex
-@inproceedings{sachith_concepttime_26,
+@inproceedings{abeywickrama2026predictive,
   title={Predictive Surprise as Self-Grounding Concept Bottleneck for Interpretable Time Series},
-  author={Abeywickrama, Sachith and Eldele, Emadeldeen and Wu, Min and Li, Xiaoli and Yuen, Chau},
+  author={Sachith Abeywickrama and Emadeldeen Eldele and Min Wu and Xiaoli Li and Chau Yuen},
   booktitle={The Fortieth Annual Conference on Neural Information Processing Systems},
-  year={2026}
+  year={2026},
+  url={https://openreview.net/forum?id=NCEfKQNRfK}
 }
 ```
 
